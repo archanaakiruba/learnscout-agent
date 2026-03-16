@@ -1,0 +1,18 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Runtime data
+chroma_store/
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
