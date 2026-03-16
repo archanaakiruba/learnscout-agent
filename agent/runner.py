@@ -5,7 +5,6 @@ import json
 import os
 import re
 import threading
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from openai import OpenAI
@@ -19,24 +18,12 @@ from tools.rag_search import index_text, clear_collection, rag_search
 from tools.web_search import web_search
 from tools.web_fetch import web_fetch
 from tools.file_reader import read_file
+from tools.resource_library import get_resources_for_skill
 
 load_dotenv()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_TRUSTED_DOMAINS = {
-    # learning platforms (matches executor site: restriction)
-    "coursera.org", "udemy.com", "youtube.com", "youtu.be", "medium.com",
-    # official docs / vendor sites
-    "docs.python.org", "pytorch.org", "tensorflow.org",
-    "huggingface.co", "fast.ai", "kaggle.com",
-    "developer.mozilla.org", "aws.amazon.com",
-    "cloud.google.com", "learn.microsoft.com",
-}
-
-_BAD_SUBDOMAINS = re.compile(
-    r'https?://(status|music|developers?|help|support|blog|about|press)\.'
-)
 
 # job boards — transient listings that expire; not useful as knowledge sources
 _JOB_BOARD_DOMAINS = {
@@ -45,8 +32,6 @@ _JOB_BOARD_DOMAINS = {
     "jobs.lever.co", "boards.greenhouse.io", "workable.com/jobs",
 }
 
-# trusted platforms used when searching for replacement / fallback resource URLs
-_RESOURCE_SITES = "site:coursera.org OR site:udemy.com OR site:youtube.com OR site:medium.com"
 
 _MIN_SOURCES = 5       # minimum indexed sources before stopping retries
 _MAX_WEB_RETRIES = 3   # max open-web fetch attempts if still below threshold
@@ -162,8 +147,13 @@ def _populate_dynamic_rag(goal: str, resume_context: str = "", log_fn=print) -> 
                 raw = raw[4:]
             raw = raw.strip()
 
-        parsed = json.loads(raw)
-        queries = parsed.get("queries", [])
+        try:
+            parsed = json.loads(raw)
+            queries = parsed.get("queries", [])
+        except Exception as _je:
+            log_fn(f"[WARN] Failed to parse query JSON ({_je}) — retrying.")
+            attempt += 1
+            continue
         log_fn(f"[RESEARCH] {len(queries)} queries generated.")
 
         max_per_query = 3 + attempt  # widens each retry: 3 → 4 → 5 → 6
@@ -215,157 +205,7 @@ def _is_english(text: str, sample_size: int = 1200) -> bool:
     return hits >= 2
 
 
-def _is_trusted(url: str) -> bool:
-    for domain in _TRUSTED_DOMAINS:
-        if domain in url:
-            return True
-    return False
 
-
-def _is_trusted_resource(url: str) -> bool:
-    """Stricter check — excludes status pages, music.youtube.com, etc."""
-    if _BAD_SUBDOMAINS.match(url):
-        return False
-    return _is_trusted(url)
-
-
-# ── Phase 4 helpers — URL validation after the plan is written ───────────────
-
-def _find_replacement_url(label: str, log_fn=print) -> str | None:
-    """Search trusted platforms for a replacement URL for a broken resource."""
-    try:
-        results = web_search(f"{label} {_RESOURCE_SITES}", max_results=5)
-        for block in results.split("\n\n"):
-            lines = block.strip().split("\n")
-            if len(lines) >= 2:
-                url = lines[1].strip()
-                if url.startswith("http") and _is_trusted(url):
-                    log_fn(f"  [URL-FIX] Replaced with: {url[:70]}")
-                    return url
-    except Exception:
-        pass
-    return None
-
-
-def _validate_urls(plan_text: str, log_fn=print) -> str:
-    """
-    Find every URL in markdown link syntax [text](url).
-    - Trusted-domain URLs: pass through without checking (stable platforms).
-    - All other URLs: HEAD-check. If broken, re-search trusted platforms for
-      a replacement. Fall back to 'search: label' only if re-search also fails.
-    """
-    HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Learnscout/1.0)"}
-    pattern = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
-    checked: dict[str, bool] = {}
-
-    def _check(url: str) -> bool:
-        if url in checked:
-            return checked[url]
-        if _is_trusted(url):
-            log_fn(f"  [URL-CHECK] ✓ trusted: {url[:65]}")
-            checked[url] = True
-            return True
-        log_fn(f"  [URL-CHECK] checking: {url[:65]}")
-        try:
-            r = requests.head(url, timeout=5, allow_redirects=True, headers=HEADERS)
-            ok = r.status_code < 400
-        except Exception:
-            ok = False
-        checked[url] = ok
-        if not ok:
-            log_fn(f"  [URL-CHECK] ✗ broken ({url[:65]})")
-        return ok
-
-    total = valid = replaced = fallback = trusted_count = 0
-
-    def _replace(m: re.Match) -> str:
-        nonlocal total, valid, replaced, fallback, trusted_count
-        label, url = m.group(1), m.group(2)
-        total += 1
-        if _is_trusted(url):
-            trusted_count += 1
-        if _check(url):
-            valid += 1
-            return m.group(0)
-        log_fn(f"  [URL-FIX] Broken: {url[:70]}")
-        new_url = _find_replacement_url(label, log_fn=log_fn)
-        if new_url:
-            replaced += 1
-            return f"[{label}]({new_url})"
-        fallback += 1
-        log_fn(f"  [URL-FIX] No replacement found for: {label} — row will be removed")
-        return f"search: {label}"  # plain text marker — row stripped in next pass
-
-    fixed = pattern.sub(_replace, plan_text)
-
-    if total:
-        log_fn(f"[URL-VALIDATE] {valid}/{total} original URLs valid, {replaced} replaced, {fallback} removed")
-
-    url_metrics = {
-        "total": total,
-        "trusted": trusted_count,
-        "valid": valid,
-        "replaced": replaced,
-        "removed_rows": fallback,
-    }
-    return fixed, url_metrics
-
-
-def _resolve_link_fallbacks(plan_text: str, log_fn=print) -> tuple[str, int, int]:
-    """
-    Find every resource table row where the Link column is not a real URL:
-    - 'search: name'  — plan writer/validator fallback
-    - plain text      — LLM wrote resource name instead of URL
-    Tries to resolve each with web_search. Removes row if nothing found.
-    Returns (fixed_text, resolved_count, removed_count).
-    """
-    # match 4-column data rows (skip separator rows with ---)
-    pattern = re.compile(
-        r'^\|(?![\s\-:]+\|)([^|\n]*)\|([^|\n]*)\|\s*([^|\n]+?)\s*\|([^|\n]*)\|\s*$',
-        re.MULTILINE,
-    )
-
-    resolved = 0
-    removed = 0
-
-    def _replace_row(m: re.Match) -> str:
-        nonlocal resolved, removed
-        col1, col2, link_cell, col4 = (
-            m.group(1), m.group(2), m.group(3).strip(), m.group(4)
-        )
-        # already a real URL or markdown link — nothing to fix
-        if link_cell.startswith("http") or link_cell.startswith("["):
-            return m.group(0)
-        # header row — skip it
-        if link_cell.lower() in ("link", "url"):
-            return m.group(0)
-        # strip 'search: ' prefix if present, use remainder as search term
-        search_term = re.sub(r'^search:\s*', '', link_cell).strip()
-        if not search_term:
-            return m.group(0)
-        log_fn(f"  [RESOLVE] Searching for: {search_term[:60]}")
-        try:
-            results = web_search(f"{search_term} {_RESOURCE_SITES}", max_results=5)
-            for block in results.split("\n\n"):
-                lines = block.strip().split("\n")
-                if len(lines) >= 2:
-                    url = lines[1].strip()
-                    if url.startswith("http") and _is_trusted(url):
-                        log_fn(f"  [RESOLVE] ✓ {url[:70]}")
-                        resolved += 1
-                        name = col1.strip()
-                        return f"|{col1}|{col2}| [{name}]({url}) |{col4}|"
-        except Exception:
-            pass
-        log_fn(f"  [RESOLVE] ✗ No URL found — row removed")
-        removed += 1
-        return ""
-
-    cleaned = pattern.sub(_replace_row, plan_text)
-    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-    if resolved or removed:
-        log_fn(f"[RESOLVE] {resolved} resolved with real URL, {removed} row(s) removed")
-    return cleaned, resolved, removed
 
 
 # ── Main entry point ─────────────────────────────────────────────────────────
@@ -373,7 +213,7 @@ def _resolve_link_fallbacks(plan_text: str, log_fn=print) -> tuple[str, int, int
 def run(
     goal: str,
     resume_path: str = "",
-    log_fn=print,
+    log_callback=print,
     on_plan=None,
     on_task_start=None,
     on_task_done=None,
@@ -383,6 +223,13 @@ def run(
     import time as _time
     reset_token_usage()
     t_total_start = _time.time()
+
+    # buffer all log messages so they can be saved to agent_log.txt after the run
+    _log_buffer: list[str] = []
+    def log_fn(msg: str):
+        _log_buffer.append(str(msg))
+        log_callback(msg)
+
     log_fn(f"[SETUP] Goal: {goal}")
 
     # index resume first so we can enrich research queries with domain context
@@ -445,18 +292,18 @@ def run(
     i = 0
     while i < len(plan):
         task = plan[i]
-        # batch consecutive web_search tasks to run them concurrently
-        if (
-            task["tool"] == "web_search"
-            and i + 1 < len(plan)
-            and plan[i + 1]["tool"] == "web_search"
-        ):
-            pair = [task, plan[i + 1]]
-            for t in pair:
+        # collect ALL consecutive web_search tasks and run them concurrently
+        if task["tool"] == "web_search":
+            batch = []
+            while i < len(plan) and plan[i]["tool"] == "web_search":
+                batch.append(plan[i])
+                i += 1
+            for t in batch:
                 t["status"] = "in_progress"
                 if on_task_start:
                     on_task_start(t)
-            log_fn(f"\n[PARALLEL] Running tasks {pair[0]['id']} & {pair[1]['id']} concurrently...")
+            ids = " & ".join(str(t["id"]) for t in batch)
+            log_fn(f"\n[PARALLEL] Running tasks {ids} concurrently...")
 
             # buffer logs from worker threads — Streamlit session context is thread-local
             parallel_buffer: list[str] = []
@@ -466,8 +313,8 @@ def run(
                 with _lock:
                     _buf.append(msg)
 
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {pool.submit(_run_task, t, _buffered_log): t for t in pair}
+            with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                futures = {pool.submit(_run_task, t, _buffered_log): t for t in batch}
                 _completed = [f.result() for f in as_completed(futures)]
                 results = {r[0]["id"]: r for r in _completed}
 
@@ -475,12 +322,11 @@ def run(
             for msg in parallel_buffer:
                 log_fn(msg)
             # write results to context in ID order so the plan writer sees them consistently
-            for t in sorted(pair, key=lambda x: x["id"]):
+            for t in sorted(batch, key=lambda x: x["id"]):
                 done_task, summary, _ = results[t["id"]]
                 context.add_result(done_task["id"], done_task["task"], summary)
                 if on_task_done:
                     on_task_done(done_task, summary)
-            i += 2
         else:
             task["status"] = "in_progress"
             if on_task_start:
@@ -493,61 +339,46 @@ def run(
 
     exec_ms = int((_time.time() - t_exec) * 1000)
 
-    # build structured resource items: {name, url} pairs so the plan writer gets
-    # display names, not just bare URLs it can't map to resources
-    _resource_item_pattern = re.compile(r'[•\-]\s*([^|\n]{3,80}?)\s*\|\s*(https?://[^\s|,)]+)')
-    _url_pattern = re.compile(r'https?://\S+')
-    _seen_urls: set[str] = set()
-    resource_items: list[dict] = []
+    # extract skill names from the gap analysis task for per-skill resource search
+    # find by description keyword first (robust to task ID shifting), fall back to id==4
+    _gap_summary = next(
+        (r.summary for r in context.summaries
+         if any(kw in r.task.lower() for kw in ("gap", "identify", "compare", "skill"))),
+        ""
+    ) or next((r.summary for r in context.summaries if r.task_id == 4), "")
 
-    def _add_item(name: str, url: str):
-        url = url.rstrip('.,)')
-        if _is_trusted_resource(url) and url not in _seen_urls:
-            resource_items.append({"name": name.strip(), "url": url})
-            _seen_urls.add(url)
+    # bullet/numbered list only — bold patterns are section headers, not skill names
+    _skill_line_pat = re.compile(r'^(?:[-•*]|\d+\.)\s+(.+)', re.MULTILINE)
+    _SKIP_LABELS = {"critical", "important", "nice to have", "gap", "skill gaps",
+                    "strengths", "weaknesses", "summary", "note", "recommendation"}
+    _skill_names: list[str] = []
+    _seen_skills: set[str] = set()
+    if _gap_summary:
+        for _m in _skill_line_pat.finditer(_gap_summary):
+            _line = _m.group(1).strip().rstrip(':').strip()
+            _key = _line.lower()
+            if _key in _SKIP_LABELS or len(_line) < 5 or _key in _seen_skills:
+                continue
+            _seen_skills.add(_key)
+            _skill_names.append(_line[:80])
+    _skill_names = _skill_names[:8]  # cap at 8 — writer targets 3-4 critical + 3-4 important
+    if not _skill_names:
+        _skill_names = [goal]
+    log_fn(f"[WRITE PLAN] Identified {len(_skill_names)} skills: {_skill_names}")
 
-    # extract structured name|url pairs; executor formats them as "• Name | URL | desc"
-    for result in context.summaries:
-        for m in _resource_item_pattern.finditer(result.summary):
-            _add_item(m.group(1), m.group(2))
-        # also capture bare URLs that didn't match the structured pattern
-        for _url in _url_pattern.findall(result.summary):
-            _add_item("", _url)
-    log_fn(f"[WRITE PLAN] {len(resource_items)} resource items after executor summaries.")
-
-    # always run per-platform search — ensures Coursera/Udemy/YouTube coverage for all skills
-    log_fn("[WRITE PLAN] Running per-platform resource search...")
-    _platforms = [
-        ("coursera.org", f"{goal} course"),
-        ("coursera.org", f"{goal} skills specialization"),
-        ("udemy.com",    f"{goal} course tutorial"),
-        ("udemy.com",    f"{goal} beginner complete course"),
-        ("youtube.com",  f"{goal} tutorial learn"),
-        ("youtube.com",  f"{goal} skills explained"),
-        ("medium.com",   f"{goal} guide article"),
-        ("medium.com",   f"{goal} skills how to"),
-    ]
-    for _domain, _q in _platforms:
-        _results = web_search(f"{_q} site:{_domain}", max_results=4, include_domains=[_domain])
-        for _block in _results.split("\n\n"):
-            _lines = _block.strip().split("\n")
-            if len(_lines) >= 2:
-                _title = _lines[0].strip()
-                _url = _lines[1].strip()
-                if _url.startswith("http") and _domain in _url and _url not in _seen_urls:
-                    _add_item(_title, _url)
-                    log_fn(f"  [RESOURCE] {_domain}: {_title[:45]}")
-    log_fn(f"[WRITE PLAN] Final: {len(resource_items)} resource items.")
-
-    # format resource items for the plan writer prompt: "Name → URL" or bare URL
-    resource_urls = [
-        f"{item['name']} → {item['url']}" if item['name'] else item['url']
-        for item in resource_items
-    ]
+    # match skills to curated resource library — no live search, no validation needed
+    log_fn("[WRITE PLAN] Matching skills to curated resource library...")
+    skill_resources: dict[str, list[dict]] = {}
+    for _skill in _skill_names:
+        _res = get_resources_for_skill(_skill)
+        skill_resources[_skill] = _res
+        log_fn(f"  [RESOURCE] '{_skill[:45]}': {len(_res)} resources matched")
+    total_res = sum(len(v) for v in skill_resources.values())
+    log_fn(f"[WRITE PLAN] Total: {total_res} curated resources across {len(skill_resources)} skills.")
 
     log_fn("\n[WRITE PLAN] Generating learning plan...")
     t_synth = _time.time()
-    learning_plan = write_plan(goal, context, sources=sources, resource_urls=resource_urls)
+    learning_plan = write_plan(goal, context, sources=sources, skill_resources=skill_resources)
     learning_plan = re.sub(r'\[Task\s+\d+\]', '', learning_plan)
     # strip table rows that contain prompt placeholder URLs
     learning_plan = re.sub(
@@ -577,17 +408,7 @@ def run(
     }
 
     def _fix_ref(m):
-        # replace both the URL and the title in `- [n] [any-title](any-url)`
-        # with the real indexed source URL and its actual page title
-        n = int(m.group(1))
-        url = source_map.get(n)
-        if not url or not _has_meaningful_path(url):
-            return m.group(0)
-        title = source_title_map.get(n, f"Source {n}")
-        return f"- [{n}] [{title}]({url})"
-
-    def _fix_plain_ref(m):
-        # convert `- [n] plain text` into a proper markdown link using real title
+        # inject real source URL and title for any reference entry — markdown or plain text
         n = int(m.group(1))
         url = source_map.get(n)
         if not url or not _has_meaningful_path(url):
@@ -598,7 +419,7 @@ def run(
     # pass 1: fix references that already have markdown link syntax
     learning_plan = re.sub(r'- \[(\d+)\] \[([^\]]+)\]\([^)]*\)', _fix_ref, learning_plan)
     # pass 2: fix plain-text references (no markdown link) — catches "search: …" entries too
-    learning_plan = re.sub(r'^- \[(\d+)\] (?!\[)([^\n]+)', _fix_plain_ref, learning_plan, flags=re.MULTILINE)
+    learning_plan = re.sub(r'^- \[(\d+)\] (?!\[)([^\n]+)', _fix_ref, learning_plan, flags=re.MULTILINE)
     # ensure blank line before **Skill:** or any ## heading after a table row
     learning_plan = re.sub(r'(\|[ \t]*)\n(\*\*Skill:)', r'\1\n\n\2', learning_plan)
     learning_plan = re.sub(r'(\|[ \t]*)(\*\*Skill:)', r'\1\n\n\2', learning_plan)
@@ -622,17 +443,10 @@ def run(
     synth_ms = int((_time.time() - t_synth) * 1000)
     log_fn("[DONE] Learning plan ready.")
 
-    # validate all URLs — replace broken ones, resolve any non-URL link cells
-    log_fn("[URL-VALIDATE] Checking resource links...")
+    # resources come from curated library — no live URL validation needed
     t_val = _time.time()
-    learning_plan, url_metrics = _validate_urls(learning_plan, log_fn=log_fn)
-    log_fn("[URL-VALIDATE] Resolving missing/fallback links...")
-    learning_plan, resolved, removed = _resolve_link_fallbacks(learning_plan, log_fn=log_fn)
-    url_metrics["resolved"] = resolved
-    url_metrics["removed_rows"] = url_metrics.get("removed_rows", 0) + removed
-    # total rows seen across both passes; final rows with a valid URL
-    url_metrics["total_rows"] = url_metrics["valid"] + resolved + url_metrics["removed_rows"]
-    url_metrics["final_valid"] = url_metrics["valid"] + resolved
+    url_metrics = {"total": 0, "trusted": 0, "valid": 0, "replaced": 0,
+                   "removed_rows": 0, "resolved": 0, "final_valid": 0, "total_rows": 0}
     val_ms = int((_time.time() - t_val) * 1000)
 
     # count inline citations in the final plan text
@@ -645,6 +459,9 @@ def run(
 
     with open(os.path.join(out_dir, "learning_plan.md"), "w", encoding="utf-8") as f:
         f.write(f"# Learning Plan\n**Goal:** {goal}\n\n{learning_plan}")
+
+    with open(os.path.join(out_dir, "agent_log.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(_log_buffer))
 
     log_fn(f"\n[SAVED] Output written to: outputs/{timestamp}/")
 

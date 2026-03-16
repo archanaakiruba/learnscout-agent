@@ -381,7 +381,7 @@ if run_btn:
             result = run(
                 goal=goal_text,
                 resume_path=resume_path,
-                log_fn=log_fn,
+                log_callback=log_fn,
                 on_plan=on_plan,
                 on_task_start=on_task_start,
                 on_task_done=on_task_done,

@@ -35,7 +35,9 @@ GPT-4o receives the goal and generates a JSON task list of 7–9 tasks: retrieve
 Each task runs through `execute_task`, which calls GPT-4o with the OpenAI tool-call API. Consecutive `web_search` tasks run in parallel via `ThreadPoolExecutor`. Tool results are truncated to 2000 chars; only the summary is stored in `AgentContext` (`agent/context.py`). A per-platform resource search runs after execution to ensure broad URL coverage.
 
 **Phase 3 — Write plan (`agent/writer.py`)**
-`write_plan` calls GPT-4o with all task summaries, indexed source URLs, and the collected resource URL list. The output is post-processed: placeholder rows are stripped, references are rewritten with real DuckDuckGo page titles, and citations are renumbered in order of first use. Every URL in the plan is then HEAD-checked; broken links are replaced via trusted-platform re-search or removed.
+`write_plan` calls GPT-4o with all task summaries, indexed source URLs, and a per-skill resource block. The output is post-processed: references are rewritten with real DuckDuckGo page titles and citations are renumbered in order of first use.
+
+> **Note — mocked resource URLs:** Resource links in the learning plan currently point to a single placeholder URL (`https://learn.microsoft.com/en-us/training/career-paths/`). This is intentional — resource URLs are mocked for simplicity.
 
 **Key files:**
 
@@ -50,6 +52,7 @@ tools/web_search.py     DuckDuckGo search via the ddgs library
 tools/web_fetch.py      HTTP fetch + BeautifulSoup text extraction
 tools/rag_search.py     ChromaDB index/query wrapper (index_text, rag_search, clear_collection)
 tools/file_reader.py    PDF and plain-text CV reader (pypdf)
+tools/resource_library.py  Mock resource URL provider (returns placeholder URL per skill)
 prompts/system.py       System prompt shared across planner, executor, and writer
 prompts/runner.py       Research query generation prompt
 prompts/planner.py      Task plan generation prompt
@@ -74,7 +77,8 @@ learning-path-agent/
 │   ├── web_search.py       DuckDuckGo search
 │   ├── web_fetch.py        URL fetch and text extraction
 │   ├── rag_search.py       ChromaDB indexing and retrieval
-│   └── file_reader.py      PDF / TXT CV reader
+│   ├── file_reader.py      PDF / TXT CV reader
+│   └── resource_library.py Mock resource URL provider
 ├── prompts/
 │   ├── system.py           Shared system prompt
 │   ├── runner.py           Research query prompt
@@ -128,7 +132,6 @@ Click **Generate Learning Plan**. The agent log updates in real time. When compl
 After each run, the **Run Evaluation** panel shows:
 - Sources indexed and fetch failures
 - Task completion counts
-- URL validation results (valid / replaced / removed)
 - Token usage and estimated cost (GPT-4o pricing)
 - Phase-by-phase latency
 
@@ -190,5 +193,5 @@ Output is also saved to `outputs/<timestamp>/learning_plan.md`.
 - **Job board filtering**: URLs from job boards (Indeed, LinkedIn Jobs, Glassdoor, etc.) are blocked during research — listings may expire.
 - **Parallel task execution**: consecutive `web_search` tasks run in a `ThreadPoolExecutor(max_workers=2)`. Logs from worker threads are buffered and flushed to the main thread so Streamlit's session state is not touched from a worker.
 - **Source title tracking**: DuckDuckGo result titles are stored alongside URLs during research and used as display text in the References section — so citations read as real page titles, not "Source 1".
-- **Three-layer URL reliability**: executor restricts searches to four trusted platforms; the plan writer is instructed to use only verified URLs; post-generation validation HEAD-checks all remaining links and replaces or removes broken ones.
+- **Mocked resource URLs**: resource links are served from `tools/resource_library.py` as a single placeholder (`learn.microsoft.com/en-us/training/career-paths/`) for simplicity. All other content — skill gaps, role requirements, citations — is fully live and personalised.
 - **No agent framework**: the pipeline is plain Python with the OpenAI SDK. Context management, task routing, parallelism, and retry logic are all explicit — no LangChain or similar abstraction overhead.

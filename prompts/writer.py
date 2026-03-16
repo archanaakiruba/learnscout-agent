@@ -40,11 +40,11 @@ LEARNING PLAN COVERAGE
 
 HYPERLINKS (resource tables)
 - Link column in every table MUST use `[Display Name](url)` — NEVER a bare URL
-- Prefer resources from the "Verified learning resources" list above — use the Name as display text and the URL as the link
-- For "Name → URL" entries, use the Name as the display text: `[Name](URL)`
-- For bare URL entries, derive a short display name from the URL path: `[Short Name](URL)`
-- You may include 2–4 resources per skill; aim for variety (Coursera course, YouTube video, Medium article)
-- Do NOT invent or hallucinate URLs that are not in the verified list
+- You MUST use ONLY the URLs from the "Verified learning resources" list above — one entry per row
+- For each skill, find the matching skill block in the verified list and use its "Name → URL" entries exactly
+- Use the Name as the display text and the URL as the link: `[Name](URL)`
+- Do NOT invent, guess, or hallucinate any URL — if a URL is not in the verified list, do not include it
+- Do NOT use example URLs from the output format section below — those are illustrative only
 
 WHAT YOU ALREADY HAVE
 - Write 3–5 bullets covering the candidate's existing strengths relevant to this goal
@@ -102,8 +102,8 @@ EXAMPLE OUTPUT (follow this structure exactly)
 
 | Resource | Description | Link | Est. Time |
 |----------|-------------|------|-----------|
-| Prompt Engineering for Developers | DeepLearning.AI short course on chain-of-thought, few-shot, and system prompt design. | [Prompt Engineering for Developers](← RESOURCE URL FROM VERIFIED LIST) | ~4 hrs |
-| ChatGPT Prompt Engineering Guide | Medium article with real product use-case examples for prompt patterns. | [ChatGPT Prompt Engineering Guide](← RESOURCE URL FROM VERIFIED LIST) | ~1 hr |
+| Prompt Engineering for Developers | DeepLearning.AI short course on chain-of-thought, few-shot, and system prompt design. | [Prompt Engineering for Developers](https://learn.microsoft.com/en-us/training/career-paths/) | ~4 hrs |
+| ChatGPT Prompt Engineering Guide | Medium article with real product use-case examples for prompt patterns. | [ChatGPT Prompt Engineering Guide](https://learn.microsoft.com/en-us/training/career-paths/) | ~1 hr |
 
 **Skill:** AI Product PRD Writing and Roadmapping
 **Why:** AI PMs must write PRDs that account for model uncertainty and translate capabilities into concrete milestones.
@@ -111,7 +111,7 @@ EXAMPLE OUTPUT (follow this structure exactly)
 
 | Resource | Description | Link | Est. Time |
 |----------|-------------|------|-----------|
-| AI Product Management Specialization | Coursera course covering PRD writing, roadmapping, and cross-functional alignment for AI products. | [AI Product Management Specialization](← RESOURCE URL FROM VERIFIED LIST) | ~3 weeks |
+| AI Product Management Specialization | Coursera course covering PRD writing, roadmapping, and cross-functional alignment for AI products. | [AI Product Management Specialization](https://learn.microsoft.com/en-us/training/career-paths/) | ~3 weeks |
 
 **Skill:** Responsible AI Frameworks (NIST AI RMF, Fairness)
 **Why:** Fairness and accountability knowledge is increasingly required at senior AI PM levels and in regulated industries.
@@ -119,7 +119,7 @@ EXAMPLE OUTPUT (follow this structure exactly)
 
 | Resource | Description | Link | Est. Time |
 |----------|-------------|------|-----------|
-| Responsible AI Practices | Google's practical guide to fairness, accountability, and transparency in AI systems. | [Responsible AI Practices](← RESOURCE URL FROM VERIFIED LIST) | ~2 hrs |
+| Responsible AI Practices | Google's practical guide to fairness, accountability, and transparency in AI systems. | [Responsible AI Practices](https://learn.microsoft.com/en-us/training/career-paths/) | ~2 hrs |
 
 **Skill:** ML Pipeline Basics (Training, Evaluation, Deployment)
 **Why:** Enables informed conversations with engineers about model training, evaluation metrics, and deployment trade-offs.
@@ -127,7 +127,7 @@ EXAMPLE OUTPUT (follow this structure exactly)
 
 | Resource | Description | Link | Est. Time |
 |----------|-------------|------|-----------|
-| Machine Learning for Everyone | Beginner-friendly course on how ML models are built, evaluated, and deployed — no coding required. | [Machine Learning for Everyone](← RESOURCE URL FROM VERIFIED LIST) | ~6 hrs |
+| Machine Learning for Everyone | Beginner-friendly course on how ML models are built, evaluated, and deployed — no coding required. | [Machine Learning for Everyone](https://learn.microsoft.com/en-us/training/career-paths/) | ~6 hrs |
 
 ## Next Steps
 
@@ -141,9 +141,9 @@ EXAMPLE OUTPUT (follow this structure exactly)
 - **AI Feature PRD:** Write a full product requirements document for an AI-powered feature in an app you use, including model uncertainty handling and success metrics — signals you can bridge business requirements and ML constraints
 
 ## References
-- [1] [Source 1](← URL IS FROM SOURCES[1] ABOVE)
-- [2] [Source 2](← URL IS FROM SOURCES[2] ABOVE)
-- [3] [Source 3](← URL IS FROM SOURCES[3] ABOVE)
+- [1] [Source 1](https://www.forbes.com/ai-product-management-guide)
+- [2] [Source 2](https://hbr.org/2023/ai-product-strategy)
+- [3] [Source 3](https://towardsdatascience.com/llm-evaluation-frameworks)
 
 ═══════════════════════════════════════════════
 END OF EXAMPLE — now write the real plan below
