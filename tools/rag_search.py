@@ -72,8 +72,9 @@ def clear_collection(name: str):
         _get_client().delete_collection(name)
     except Exception:
         pass
-    if name in COLLECTIONS:
-        del COLLECTIONS[name]
+    # Clear ALL cached collection objects — deleting one collection can invalidate
+    # the ChromaDB segment reader for others when using PersistentClient.
+    COLLECTIONS.clear()
 
 
 def rag_search(query: str, collection: str, top_k: int = 6) -> str:

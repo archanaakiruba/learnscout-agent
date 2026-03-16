@@ -32,7 +32,7 @@ GPT-4o generates 7 targeted search queries from the career goal and any domain c
 GPT-4o receives the goal and generates a JSON task list of 7–9 tasks: retrieve role requirements from `dynamic_kb`, retrieve the candidate's background from `resume`, cross-reference both, identify skill gaps, then one `web_search` task per gap (Coursera, Udemy, YouTube, Medium), and a final reasoning task.
 
 **Phase 2 — Execute (`agent/executor.py`)**
-Each task runs through `execute_task`, which calls GPT-4o with the OpenAI tool-call API. Consecutive `web_search` tasks run in parallel via `ThreadPoolExecutor`. Tool results are truncated to 2000 chars; only the summary is stored in `AgentContext` (`agent/context.py`). A per-platform resource search runs after execution to ensure broad URL coverage.
+Each task runs through `execute_task`, which calls GPT-4o with the OpenAI tool-call API. Consecutive `web_search` tasks run in parallel via `ThreadPoolExecutor`. Tool results are truncated to 2000 chars; only the summary is stored in `AgentContext` (`agent/context.py`).
 
 **Phase 3 — Write plan (`agent/writer.py`)**
 `write_plan` calls GPT-4o with all task summaries, indexed source URLs, and a per-skill resource block. The output is post-processed: references are rewritten with real DuckDuckGo page titles and citations are renumbered in order of first use.
@@ -43,7 +43,7 @@ Each task runs through `execute_task`, which calls GPT-4o with the OpenAI tool-c
 
 ```
 app.py                  Streamlit UI — inputs, live agent log, plan display, run metrics
-agent/runner.py         Main orchestrator — all four phases, URL validation, output saving
+agent/runner.py         Main orchestrator — all four phases, output saving
 agent/planner.py        Calls GPT-4o to generate the JSON task plan
 agent/executor.py       Executes a single task with tool-call loop and token tracking
 agent/writer.py         Calls GPT-4o to write the final learning plan
@@ -52,7 +52,6 @@ tools/web_search.py     DuckDuckGo search via the ddgs library
 tools/web_fetch.py      HTTP fetch + BeautifulSoup text extraction
 tools/rag_search.py     ChromaDB index/query wrapper (index_text, rag_search, clear_collection)
 tools/file_reader.py    PDF and plain-text CV reader (pypdf)
-tools/resource_library.py  Mock resource URL provider (returns placeholder URL per skill)
 prompts/system.py       System prompt shared across planner, executor, and writer
 prompts/runner.py       Research query generation prompt
 prompts/planner.py      Task plan generation prompt
@@ -77,8 +76,7 @@ learning-path-agent/
 │   ├── web_search.py       DuckDuckGo search
 │   ├── web_fetch.py        URL fetch and text extraction
 │   ├── rag_search.py       ChromaDB indexing and retrieval
-│   ├── file_reader.py      PDF / TXT CV reader
-│   └── resource_library.py Mock resource URL provider
+│   └── file_reader.py      PDF / TXT CV reader
 ├── prompts/
 │   ├── system.py           Shared system prompt
 │   ├── runner.py           Research query prompt
@@ -135,7 +133,7 @@ After each run, the **Run Evaluation** panel shows:
 - Token usage and estimated cost (GPT-4o pricing)
 - Phase-by-phase latency
 
-Output is also saved to `outputs/<timestamp>/learning_plan.md`.
+Output is also saved to `outputs/<timestamp>/` — `learning_plan.md` and `agent_log.txt`.
 
 ---
 
@@ -191,7 +189,7 @@ Output is also saved to `outputs/<timestamp>/learning_plan.md`.
 - **ChromaDB for local RAG**: two persistent collections (`resume`, `dynamic_kb`) are cleared and rebuilt on every run to prevent cross-run contamination. No external vector store needed.
 - **DuckDuckGo for free search**: no API key required. The research phase tries year-suffixed queries (2026, 2025) for freshness before falling back to the base query.
 - **Job board filtering**: URLs from job boards (Indeed, LinkedIn Jobs, Glassdoor, etc.) are blocked during research — listings may expire.
-- **Parallel task execution**: consecutive `web_search` tasks run in a `ThreadPoolExecutor(max_workers=2)`. Logs from worker threads are buffered and flushed to the main thread so Streamlit's session state is not touched from a worker.
+- **Parallel task execution**: consecutive `web_search` tasks run in a `ThreadPoolExecutor(max_workers=len(batch))` so all parallel tasks run concurrently. Logs from worker threads are buffered and flushed to the main thread so Streamlit's session state is not touched from a worker.
 - **Source title tracking**: DuckDuckGo result titles are stored alongside URLs during research and used as display text in the References section — so citations read as real page titles, not "Source 1".
-- **Mocked resource URLs**: resource links are served from `tools/resource_library.py` as a single placeholder (`learn.microsoft.com/en-us/training/career-paths/`) for simplicity. All other content — skill gaps, role requirements, citations — is fully live and personalised.
+- **Mocked resource URLs**: all resource links in the learning plan use a single placeholder URL (`learn.microsoft.com/en-us/training/career-paths/`) hardcoded in the writer prompt and enforced by post-processing. The skill name from each `**Skill:**` heading is used as the link display text. All other content — skill gaps, role requirements, citations — is fully live and personalised.
 - **No agent framework**: the pipeline is plain Python with the OpenAI SDK. Context management, task routing, parallelism, and retry logic are all explicit — no LangChain or similar abstraction overhead.

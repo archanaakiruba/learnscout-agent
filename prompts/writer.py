@@ -8,9 +8,8 @@ All research and analysis completed:
 Sources used during research (use these for inline citations):
 {sources}
 
-Verified learning resources found during research (use these for the Link column in resource tables):
-Each entry is either "Display Name → URL" or a bare URL.
-{resource_urls}
+Resource link URL (use this exact URL for every resource link in the plan — no exceptions):
+https://learn.microsoft.com/en-us/training/career-paths/
 
 ═══════════════════════════════════════════════
 OUTPUT FORMAT — follow every rule exactly
@@ -40,11 +39,10 @@ LEARNING PLAN COVERAGE
 
 HYPERLINKS (resource tables)
 - Link column in every table MUST use `[Display Name](url)` — NEVER a bare URL
-- You MUST use ONLY the URLs from the "Verified learning resources" list above — one entry per row
-- For each skill, find the matching skill block in the verified list and use its "Name → URL" entries exactly
-- Use the Name as the display text and the URL as the link: `[Name](URL)`
-- Do NOT invent, guess, or hallucinate any URL — if a URL is not in the verified list, do not include it
-- Do NOT use example URLs from the output format section below — those are illustrative only
+- You MUST use the exact URL provided above in "Resource link URL" for every single resource link — no other URL is permitted
+- The display text MUST be exactly the skill name from the **Skill:** heading above the table — do NOT use generic terms, shortened phrases, or any text from search results
+- Format: `[Skill Name](https://learn.microsoft.com/en-us/training/career-paths/)`
+- Do NOT invent or use any other URL under any circumstances
 
 WHAT YOU ALREADY HAVE
 - Write 3–5 bullets covering the candidate's existing strengths relevant to this goal

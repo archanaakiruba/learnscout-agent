@@ -10,7 +10,6 @@ def write_plan(
     goal: str,
     context: AgentContext,
     sources: list[str] | None = None,
-    skill_resources: dict | None = None,
 ) -> str:
     """Generate the final learning plan from all gathered context."""
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -19,24 +18,10 @@ def write_plan(
     if sources:
         numbered_sources = "\n".join(f"[{i+1}] {url}" for i, url in enumerate(sources))
 
-    resource_url_block = ""
-    if skill_resources:
-        lines = []
-        for skill, items in skill_resources.items():
-            if items:
-                lines.append(f"**{skill}**")
-                for item in items:
-                    lines.append(f"- {item['name']} → {item['url']}")
-                lines.append("")
-        resource_url_block = "\n".join(lines).strip()
-    if not resource_url_block:
-        resource_url_block = "None found — omit all resource rows."
-
     prompt = PLAN_WRITER_PROMPT.format(
         goal=goal,
         context=context.build_context_string(max_summaries=20),
         sources=numbered_sources if numbered_sources else "No web sources recorded.",
-        resource_urls=resource_url_block,
     )
 
     response = _track(_chat_with_retry(

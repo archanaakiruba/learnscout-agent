@@ -226,6 +226,8 @@ st.markdown("""
         padding: 1rem 1.2rem;
         box-shadow: 0 1px 4px rgba(0,0,0,0.04);
         margin-top: 0.5rem;
+        min-height: 100px;
+        align-items: stretch;
     }
     .usage-stat {
         flex: 1;
@@ -485,7 +487,6 @@ li{{margin-bottom:3px;}}
     if usage or metrics:
         st.divider()
         r = metrics.get("research", {})
-        u = metrics.get("urls", {})
         t = metrics.get("tasks", {})
         lat = metrics.get("latency_ms", {})
         total_lat = lat.get("total", 0)
@@ -501,10 +502,9 @@ li{{margin-bottom:3px;}}
         tok_total = usage.get("total", 0)
         cost = usage.get("cost_usd", 0.0)
 
-        # row 1: research | cost & tokens
-        ev_row1_left, ev_row1_right = st.columns(2, gap="large")
+        ev_col1, ev_col2, ev_col3 = st.columns(3, gap="large")
 
-        with ev_row1_left:
+        with ev_col1:
             st.markdown('<div class="group-label">Research</div>', unsafe_allow_html=True)
             st.markdown(
                 f'<div class="usage-bar">'
@@ -516,34 +516,19 @@ li{{margin-bottom:3px;}}
                 unsafe_allow_html=True,
             )
 
-        with ev_row1_right:
+        with ev_col2:
             st.markdown('<div class="group-label">Cost &amp; Tokens</div>', unsafe_allow_html=True)
             st.markdown(
                 f'<div class="usage-bar">'
                 + _stat(f"{inp:,}", "Input tokens")
                 + _stat(f"{out:,}", "Output tokens")
                 + _stat(f"{tok_total:,}", "Total tokens")
-                + _stat(f"${cost:.4f}", "Est. cost (GPT-4o)", highlight=True)
+                + _stat(f"${cost:.4f}", "Cost (USD)", highlight=True)
                 + f'</div>',
                 unsafe_allow_html=True,
             )
 
-        # row 2: resource links | latency
-        ev_row2_left, ev_row2_right = st.columns(2, gap="large")
-
-        with ev_row2_left:
-            st.markdown('<div class="group-label">Resource Links</div>', unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="usage-bar">'
-                + _stat(f'{u.get("final_valid","—")}/{u.get("total_rows","—")}', "Valid")
-                + _stat(u.get("replaced", "—"), "Replaced")
-                + _stat(u.get("resolved", "—"), "Resolved")
-                + _stat(u.get("removed_rows", "—"), "Rows removed", highlight=True)
-                + f'</div>',
-                unsafe_allow_html=True,
-            )
-
-        with ev_row2_right:
+        with ev_col3:
             if lat:
                 st.markdown('<div class="group-label">Latency</div>', unsafe_allow_html=True)
                 st.markdown(
@@ -551,7 +536,6 @@ li{{margin-bottom:3px;}}
                     + _stat(f'{lat.get("research",0)/1000:.1f}s', "Research")
                     + _stat(f'{lat.get("execution",0)/1000:.1f}s', "Execution")
                     + _stat(f'{lat.get("synthesis",0)/1000:.1f}s', "Synthesis")
-                    + _stat(f'{lat.get("validation",0)/1000:.1f}s', "Validation")
                     + _stat(f'{total_lat/1000:.1f}s', "Total", highlight=True)
                     + f'</div>',
                     unsafe_allow_html=True,

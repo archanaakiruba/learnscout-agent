@@ -18,7 +18,6 @@ from tools.rag_search import index_text, clear_collection, rag_search
 from tools.web_search import web_search
 from tools.web_fetch import web_fetch
 from tools.file_reader import read_file
-from tools.resource_library import get_resources_for_skill
 
 load_dotenv()
 
@@ -339,47 +338,26 @@ def run(
 
     exec_ms = int((_time.time() - t_exec) * 1000)
 
-    # extract skill names from the gap analysis task for per-skill resource search
-    # find by description keyword first (robust to task ID shifting), fall back to id==4
-    _gap_summary = next(
-        (r.summary for r in context.summaries
-         if any(kw in r.task.lower() for kw in ("gap", "identify", "compare", "skill"))),
-        ""
-    ) or next((r.summary for r in context.summaries if r.task_id == 4), "")
-
-    # bullet/numbered list only — bold patterns are section headers, not skill names
-    _skill_line_pat = re.compile(r'^(?:[-•*]|\d+\.)\s+(.+)', re.MULTILINE)
-    _SKIP_LABELS = {"critical", "important", "nice to have", "gap", "skill gaps",
-                    "strengths", "weaknesses", "summary", "note", "recommendation"}
-    _skill_names: list[str] = []
-    _seen_skills: set[str] = set()
-    if _gap_summary:
-        for _m in _skill_line_pat.finditer(_gap_summary):
-            _line = _m.group(1).strip().rstrip(':').strip()
-            _key = _line.lower()
-            if _key in _SKIP_LABELS or len(_line) < 5 or _key in _seen_skills:
-                continue
-            _seen_skills.add(_key)
-            _skill_names.append(_line[:80])
-    _skill_names = _skill_names[:8]  # cap at 8 — writer targets 3-4 critical + 3-4 important
-    if not _skill_names:
-        _skill_names = [goal]
-    log_fn(f"[WRITE PLAN] Identified {len(_skill_names)} skills: {_skill_names}")
-
-    # match skills to curated resource library — no live search, no validation needed
-    log_fn("[WRITE PLAN] Matching skills to curated resource library...")
-    skill_resources: dict[str, list[dict]] = {}
-    for _skill in _skill_names:
-        _res = get_resources_for_skill(_skill)
-        skill_resources[_skill] = _res
-        log_fn(f"  [RESOURCE] '{_skill[:45]}': {len(_res)} resources matched")
-    total_res = sum(len(v) for v in skill_resources.values())
-    log_fn(f"[WRITE PLAN] Total: {total_res} curated resources across {len(skill_resources)} skills.")
-
     log_fn("\n[WRITE PLAN] Generating learning plan...")
     t_synth = _time.time()
-    learning_plan = write_plan(goal, context, sources=sources, skill_resources=skill_resources)
+    learning_plan = write_plan(goal, context, sources=sources)
     learning_plan = re.sub(r'\[Task\s+\d+\]', '', learning_plan)
+    # enforce skill name + mock URL on every resource table row:
+    # scan for **Skill: X** headings and replace all links in the table below with [X](MOCK_URL)
+    _MOCK_URL = "https://learn.microsoft.com/en-us/training/career-paths/"
+    _current_skill = None
+    _fixed_lines = []
+    _in_refs = False
+    for _line in learning_plan.split('\n'):
+        if _line.startswith('## References'):
+            _in_refs = True
+        _skill_heading = re.match(r'\*\*Skill:\s*(.+?)\*\*', _line)
+        if _skill_heading:
+            _current_skill = _skill_heading.group(1).strip()
+        if not _in_refs and _current_skill and _line.strip().startswith('|'):
+            _line = re.sub(r'\[([^\]]+)\]\([^)]+\)', f'[{_current_skill}]({_MOCK_URL})', _line)
+        _fixed_lines.append(_line)
+    learning_plan = '\n'.join(_fixed_lines)
     # strip table rows that contain prompt placeholder URLs
     learning_plan = re.sub(
         r'^\|[^\n]*(?:EXAMPLE_URL|INSERT REAL URL|RESOURCE URL FROM VERIFIED LIST)[^\n]*\|[ \t]*$',

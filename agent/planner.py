@@ -29,5 +29,8 @@ def generate_plan(goal: str) -> list[dict]:
             raw = raw[4:]
         raw = raw.strip()
 
-    plan = json.loads(raw)
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Planner returned invalid JSON: {e}\nRaw output: {raw[:300]}") from e
     return plan
